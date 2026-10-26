@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SACH.IN</title>
+    <link rel="icon" type="image/svg+xml" href="icon.svg">
+    <link rel="manifest" href="manifest.json">
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 480px; margin: 2rem auto; padding: 0 1rem; }
+        input, button { padding: 8px; font-size: 16px; }
+        input[type=url] { width: 65%; }
+        #code { font-size: 2rem; letter-spacing: 6px; font-weight: bold; }
+        #join { width: 5em; }
+        li { margin: 6px 0; word-break: break-all; }
+        #status { color: #666; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+    <p>Your code: <span id="code">----</span></p>
+    <p>
+        Join a device: <input id="join" maxlength="4" inputmode="numeric" placeholder="1234">
+        <button onclick="joinCode()">Connect</button>
+    </p>
+    <p id="status">Starting...</p>
+
+    <hr>
+    <input type="url" id="link" placeholder="https://...">
+    <button onclick="addLink()">Add</button>
+    <ul id="list"></ul>
+
+    <script>
+        const PREFIX = 'sachin-sync-';
+        let links = JSON.parse(localStorage.getItem('links') || '[]');
+        let conns = [];
+        let peer;
+
+        const $ = id => document.getElementById(id);
+        const status = t => $('status').textContent = t;
+
+        function render() {
+            $('list').innerHTML = '';
+            links.forEach(l => {
+                const li = document.createElement('li');
+                const a = document.createElement('a');
+                a.href = l; a.textContent = l; a.target = '_blank';
+                li.appendChild(a);
+                $('list').appendChild(li);
+            });
+            localStorage.setItem('links', JSON.stringify(links));
+        }
+
+        function merge(incoming, from) {
+            let changed = false;
+            incoming.forEach(l => { if (!links.includes(l)) { links.push(l); changed = true; } });
+            if (changed) { render(); broadcast(from); }
+        }
+
+        function broadcast(except) {
+            conns.forEach(c => { if (c !== except && c.open) c.send(links); });
+        }
+
+        function addLink() {
+            const v = $('link').value.trim();
+            if (!v) return;
+            if (!links.includes(v)) links.push(v);
+            $('link').value = '';
+            render();
+            broadcast();
+        }
+
+        function setupConn(c) {
+            c.on('open', () => {
+                conns.push(c);
+                c.send(links);
+                status('Connected: ' + conns.length + ' device(s)');
+            });
+            c.on('data', data => merge(data, c));
+            c.on('close', () => {
+                conns = conns.filter(x => x !== c);
+                status('Connected: ' + conns.length + ' device(s)');
+            });
+        }
+
+        function start() {
+            const code = String(Math.floor(1000 + Math.random() * 9000));
+            peer = new Peer(PREFIX + code);
+            peer.on('open', () => { $('code').textContent = code; status('Ready. Share your code or enter another.'); });
+            peer.on('error', e => {
+                if (e.type === 'unavailable-id') start();   // code taken, try another
+                else status('Error: ' + e.type);
+            });
+            peer.on('connection', setupConn);
+        }
+
+        function joinCode() {
+            const code = $('join').value.trim();
+            if (!/^\d{4}$/.test(code)) return status('Enter a 4-digit code');
+            status('Connecting...');
+            setupConn(peer.connect(PREFIX + code));
+        }
+
+        render();
+        start();
+    </script>
+</body>
+</html>
